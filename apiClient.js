@@ -1,5 +1,6 @@
 import { config } from './config.js';
 import { RateLimiter, sleep } from './rateLimiter.js';
+import { resolveField, VOLUME_CANDIDATES } from './fieldPaths.js';
 
 const limiter = new RateLimiter(config.maxRequestsPerMinute);
 
@@ -60,19 +61,51 @@ export async function apiGet(path, { retries = 4 } = {}) {
   throw new Error(`unreachable: exhausted retries for ${path}`);
 }
 
-// Pulls every page of GET /tokens?mode=reward into one array.
+// Pulls pages of GET /tokens?mode=reward into one array. Stops early once a
+// page has nothing above the volume filter (see earlyStopOnLowVolume in
+// config.js), and if a page fails after retries, keeps whatever was already
+// gathered instead of losing the whole sweep.
 export async function fetchAllRewardTokens() {
   const all = [];
   let page = 1;
 
   for (;;) {
-    const data = await apiGet(
-      `/tokens?mode=reward&sort=volume&page=${page}&pageSize=${config.pageSize}`
-    );
+    let data;
+    try {
+      data = await apiGet(
+        `/tokens?mode=reward&sort=volume&page=${page}&pageSize=${config.pageSize}`
+      );
+    } catch (err) {
+      console.error(
+        `[sweep] giving up on page ${page} after retries (${err.message}) — ` +
+          `keeping the ${all.length} tokens already fetched this sweep.`
+      );
+      break;
+    }
+
     const tokens = data?.tokens || data?.items || (Array.isArray(data) ? data : []);
     if (!Array.isArray(tokens) || tokens.length === 0) break;
 
     all.push(...tokens);
+
+    if (config.debugRaw && (page === 1 || page % 10 === 0)) {
+      const firstVol = resolveField(tokens[0], VOLUME_CANDIDATES).value;
+      const lastVol = resolveField(tokens[tokens.length - 1], VOLUME_CANDIDATES).value;
+      console.log(`[DEBUG RAW] page ${page}: first token volume=${firstVol}, last token volume=${lastVol}`);
+    }
+
+    if (config.earlyStopOnLowVolume) {
+      const anyAboveThreshold = tokens.some((t) => {
+        const { value } = resolveField(t, VOLUME_CANDIDATES);
+        return value !== undefined && value >= config.minVolumeUsd;
+      });
+      if (!anyAboveThreshold) {
+        console.log(
+          `[sweep] page ${page}: no tokens above $${config.minVolumeUsd} volume — stopping pagination early.`
+        );
+        break;
+      }
+    }
 
     // Stop once a page comes back short of a full page (last page), or if
     // the response tells us directly there's no more.
