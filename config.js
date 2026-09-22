@@ -38,6 +38,14 @@ export const config = {
 
   pageSize: num('PAGE_SIZE', 100),
 
+  // sort=volume is assumed to return highest-volume tokens first. Since the
+  // volume filter is a hard floor anyway, once a whole page has nothing
+  // above minVolumeUsd there's no point fetching deeper pages — and this
+  // avoids the deep-offset pages (30+) that were timing out. Set to false
+  // if DEBUG_RAW logs show the sort is actually ascending.
+  earlyStopOnLowVolume: bool('EARLY_STOP_ON_LOW_VOLUME', true),
+
+
   // Prints the FULL raw JSON of the first token + first rewards response it
   // sees, once, so you can confirm exact field names and fix the candidate
   // lists in fieldPaths.js if the API's actual shape differs. Turn this on
