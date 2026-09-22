@@ -1,0 +1,16 @@
+{
+  "name": "stonkfun-rewards-bot",
+  "version": "1.0.0",
+  "description": "Scans all StonkFun reward tokens in real time and alerts when pending rewards, holder count and volume match your filters.",
+  "type": "module",
+  "main": "index.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
