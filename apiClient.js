@@ -3,9 +3,14 @@ import { RateLimiter, sleep } from './rateLimiter.js';
 
 const limiter = new RateLimiter(config.maxRequestsPerMinute);
 
-// Small retry wrapper: honours Retry-After on 429, retries 500/503 a couple
-// times with backoff, and rethrows everything else.
-export async function apiGet(path, { retries = 3 } = {}) {
+// Any of these are treated as transient — worth a retry with backoff rather
+// than failing the whole sweep. 502/503/504 are gateway/upstream hiccups,
+// not something wrong with the request itself.
+const RETRYABLE_STATUSES = new Set([500, 502, 503, 504]);
+
+// Small retry wrapper: honours Retry-After on 429, retries gateway-ish 5xx
+// errors a few times with backoff, and rethrows everything else.
+export async function apiGet(path, { retries = 4 } = {}) {
   const url = `${config.apiBase}${path}`;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -29,10 +34,11 @@ export async function apiGet(path, { retries = 3 } = {}) {
       continue;
     }
 
-    if (res.status === 500 || res.status === 503) {
+    if (RETRYABLE_STATUSES.has(res.status)) {
       if (attempt === retries) {
         throw new Error(`${res.status} from ${path} after ${retries} retries`);
       }
+      // Exponential-ish backoff: 500ms, 1000ms, 1500ms, 2000ms...
       await sleep(500 * (attempt + 1));
       continue;
     }
